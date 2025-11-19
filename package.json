@@ -4,8 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev:client": "vite",
+    "dev:server": "cd backend && node server.js",
+    "dev": "pnpm run dev:server & pnpm run dev:client",
+    "build:client": "vite build",
+    "build": "pnpm run build:client",
     "preview": "vite preview"
   },
   "dependencies": {
