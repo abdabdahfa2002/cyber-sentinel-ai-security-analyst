@@ -1,21 +1,15 @@
 import type { VTDomainReport, VTFileReport, VTRelationship, VTIPAddressReport, VTURLReport } from '../types.ts';
 
-// The base URL for the VirusTotal API
-const API_BASE_URL = 'https://www.virustotal.com/api/v3';
-// A public CORS proxy to bypass browser security restrictions for client-side API calls.
-const PROXY_URL = 'https://corsproxy.io/?';
-
+// Using our local backend proxy instead of a public CORS proxy
+const API_BASE_URL = '/api/vt';
 
 const fetchFromVT = async (apiKey: string, endpoint: string) => {
-    // NOTE: In a real production app, API calls should be routed through a secure backend proxy
-    // to protect the API key and manage requests. For this client-side tool, we use a public
-    // CORS proxy as a workaround for browser security (CORS) policies.
-    const targetUrl = `${API_BASE_URL}/${endpoint}`;
-  
-    const response = await fetch(`${PROXY_URL}${encodeURIComponent(targetUrl)}`, {
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
         method: 'GET',
         headers: {
-        'x-apikey': apiKey,
+            'x-vt-apikey': apiKey,
+            'Authorization': `Bearer ${token}`
         },
     });
 
@@ -27,7 +21,7 @@ const fetchFromVT = async (apiKey: string, endpoint: string) => {
             throw new Error('Rate limit exceeded. Please wait.');
         }
         if (response.status === 401) {
-            throw new Error('Authentication failed. Check your API key.');
+            throw new Error('Authentication failed. Check your API key or login session.');
         }
         
         try {
@@ -57,10 +51,7 @@ export const getIPReport = async (apiKey: string, ip: string): Promise<VTIPAddre
     return { ...data, type: 'ip_address' };
 };
 
-// VirusTotal's URL endpoint requires the URL identifier, which is the SHA256 hash of the URL.
-// However, the API also allows GET /urls/{base64_encoded_url}. We use this for simplicity.
 const getURLIdentifier = (url: string): string => {
-    // Base64 encode the URL and remove padding, as required by the VT API.
     return btoa(url).replace(/=/g, '');
 };
 
@@ -77,12 +68,12 @@ export const getRelationship = async (apiKey: string, iocType: 'domains' | 'file
         endpoint = `urls/${urlIdentifier}/${relationship}?limit=10`;
     }
 
-    const targetUrl = `${API_BASE_URL}/${endpoint}`;
-
-    const response = await fetch(`${PROXY_URL}${encodeURIComponent(targetUrl)}`, {
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
         method: 'GET',
         headers: {
-            'x-apikey': apiKey,
+            'x-vt-apikey': apiKey,
+            'Authorization': `Bearer ${token}`
         },
     });
 

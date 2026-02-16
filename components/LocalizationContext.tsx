@@ -23,6 +23,7 @@ const translations: Record<Locale, Translations> = {
     uaAnalyzer: 'User-Agent Analyzer',
     vulnScanner: 'Vulnerability Scanner',
     threatIntel: 'Threat Intel Feed',
+    psAnalyzer: 'PowerShell Analyzer',
     soon: 'Soon',
     // AI Analyst
     backToCase: 'Back to Case',
@@ -218,6 +219,7 @@ const translations: Record<Locale, Translations> = {
     uaAnalyzer: 'محلل وكيل المستخدم',
     vulnScanner: 'فاحص الثغرات',
     threatIntel: 'تغذية معلومات التهديدات',
+    psAnalyzer: 'محلل PowerShell',
     soon: 'قريباً',
     // AI Analyst
     backToCase: 'العودة إلى القضية',

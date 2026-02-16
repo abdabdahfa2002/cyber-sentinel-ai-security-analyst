@@ -7,14 +7,147 @@ const { GoogleGenAI, Type } = require("@google/genai");
 dotenv.config({ path: '../.env.local' });
 
 const app = express();
+const connectDB = require('./config/db');
+const authRoutes = require('./routes/authRoutes');
+const caseRoutes = require('./routes/caseRoutes');
+const { protect } = require('./middleware/auth');
+
+// Connect to Database
+connectDB();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
+app.use('/api/auth', authRoutes);
+app.use('/api/cases', caseRoutes);
 app.use(cors());
 app.use(express.json());
 
+// VirusTotal Proxy Endpoint
+app.get('/api/vt/:type/:id', protect, async (req, res) => {
+    try {
+        const { type, id } = req.params;
+        const vtApiKey = req.headers['x-vt-apikey'];
+        
+        if (!vtApiKey) {
+            return res.status(400).json({ error: "Missing VirusTotal API Key" });
+        }
+
+        const vtUrl = `https://www.virustotal.com/api/v3/${type}/${id}`;
+        const response = await fetch(vtUrl, {
+            method: 'GET',
+            headers: {
+                'x-apikey': vtApiKey
+            }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            return res.status(response.status).json(errorData);
+        }
+
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error("VT Proxy Error:", error);
+        res.status(500).json({ error: "Internal Server Error in VT Proxy" });
+    }
+});
+
+app.get('/api/vt/:type/:id/:relationship', protect, async (req, res) => {
+    try {
+        const { type, id, relationship } = req.params;
+        const { limit } = req.query;
+        const vtApiKey = req.headers['x-vt-apikey'];
+        
+        if (!vtApiKey) {
+            return res.status(400).json({ error: "Missing VirusTotal API Key" });
+        }
+
+        const vtUrl = `https://www.virustotal.com/api/v3/${type}/${id}/${relationship}${limit ? `?limit=${limit}` : ''}`;
+        const response = await fetch(vtUrl, {
+            method: 'GET',
+            headers: {
+                'x-apikey': vtApiKey
+            }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            return res.status(response.status).json(errorData);
+        }
+
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error("VT Relationship Proxy Error:", error);
+        res.status(500).json({ error: "Internal Server Error in VT Proxy" });
+    }
+});
+
+// PowerShell Deobfuscation Endpoint
+app.post('/api/analyze-powershell', protect, async (req, res) => {
+    try {
+        const { commands } = req.body;
+        if (!commands || !Array.isArray(commands)) {
+            return res.status(400).json({ error: "Missing commands array" });
+        }
+
+        const results = [];
+        for (const cmd of commands) {
+            if (!cmd || cmd.trim() === "") {
+                results.push({ original: cmd, decoded: "Empty command", error: null });
+                continue;
+            }
+
+            try {
+                const prompt = `You are a malware analyst. Deobfuscate and explain the following PowerShell command. If it's Base64 encoded, decode it first. Provide the decoded script and a brief summary of what it does.
+                
+                Command: ${cmd}
+                
+                Respond in JSON format:
+                {
+                    "decoded_script": "the full decoded script here",
+                    "summary": "brief explanation of the script's purpose",
+                    "is_malicious": true/false
+                }`;
+
+                const response = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: prompt,
+                    config: {
+                        responseMimeType: 'application/json',
+                    }
+                });
+
+                const analysis = JSON.parse(response.text.trim());
+                results.push({
+                    original: cmd,
+                    decoded: analysis.decoded_script,
+                    summary: analysis.summary,
+                    is_malicious: analysis.is_malicious,
+                    error: null
+                });
+            } catch (err) {
+                console.error("Error analyzing command:", err);
+                results.push({
+                    original: cmd,
+                    decoded: null,
+                    summary: null,
+                    error: "Failed to analyze this command"
+                });
+            }
+        }
+
+        res.json({ results });
+    } catch (error) {
+        console.error("PowerShell Analysis Error:", error);
+        res.status(500).json({ error: "Internal Server Error during analysis" });
+    }
+});
+
 // Initialize Gemini AI
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const JWT_SECRET = process.env.JWT_SECRET;
 if (!GEMINI_API_KEY) {
     console.error("GEMINI_API_KEY environment variable not set.");
     process.exit(1);
@@ -180,7 +313,8 @@ const userAgentAnalysesSchema = {
 // --- API Endpoints ---
 
 // POST /api/analyze-event
-app.post('/api/analyze-event', async (req, res) => {
+// All Gemini API routes now require authentication
+app.post('/api/analyze-event', protect, async (req, res) => {
     try {
         const { eventLog } = req.body;
         if (!eventLog) {
@@ -206,7 +340,7 @@ app.post('/api/analyze-event', async (req, res) => {
 });
 
 // POST /api/suggest-next-steps
-app.post('/api/suggest-next-steps', async (req, res) => {
+app.post('/api/suggest-next-steps', protect, async (req, res) => {
     try {
         const { caseContext } = req.body;
         if (!caseContext) {
@@ -238,7 +372,7 @@ ${caseContext}`,
 });
 
 // POST /api/generate-phase-index
-app.post('/api/generate-phase-index', async (req, res) => {
+app.post('/api/generate-phase-index', protect, async (req, res) => {
     try {
         const { artifacts } = req.body;
         if (!artifacts) {
@@ -268,7 +402,7 @@ ${context}`,
 });
 
 // POST /api/split-and-classify-artifact
-app.post('/api/split-and-classify-artifact', async (req, res) => {
+app.post('/api/split-and-classify-artifact', protect, async (req, res) => {
     try {
         const { content } = req.body;
         if (!content) {
@@ -298,7 +432,7 @@ ${content}`,
 });
 
 // POST /api/generate-global-summary
-app.post('/api/generate-global-summary', async (req, res) => {
+app.post('/api/generate-global-summary', protect, async (req, res) => {
     try {
         const { caseContext } = req.body;
         if (!caseContext) {
@@ -321,8 +455,17 @@ ${caseContext}`,
     }
 });
 
+// Helper function to stringify artifact content
+const stringifyArtifactContent = (content) => {
+    if (content && 'summary' in content) return `AI Analysis Summary: ${content.summary}`;
+    if (content && 'text' in content) return content.text;
+    if (content && 'output' in content) return `Tool: ${content.toolName}\nCommand: ${content.command || 'N/A'}\nOutput:\n${content.output}`;
+    if (content && 'fileName' in content) return `File: ${content.fileName}\nContent:\n${content.content}`;
+    return JSON.stringify(content);
+}
+
 // POST /api/generate-global-iocs
-app.post('/api/generate-global-iocs', async (req, res) => {
+app.post('/api/generate-global-iocs', protect, async (req, res) => {
     try {
         const { artifacts } = req.body;
         if (!artifacts) {
@@ -330,18 +473,14 @@ app.post('/api/generate-global-iocs', async (req, res) => {
         }
 
         // Helper function to stringify content (copied from geminiService.ts)
-        const stringifyArtifactContent = (content) => {
-            if (content && 'summary' in content) return `AI Analysis Summary: ${content.summary}`;
-            if (content && 'text' in content) return content.text;
-            if (content && 'output' in content) return `Tool: ${content.toolName}\nCommand: ${content.command || 'N/A'}\nOutput:\n${content.output}`;
-            if (content && 'fileName' in content) return `File: ${content.fileName}\nContent:\n${content.content}`;
-            return JSON.stringify(content);
-        }
+
 
         const context = artifacts
             .filter(a => a.type !== 'CASE_INDEX' && a.type !== 'TOOL_INFO' && a.type !== 'GLOBAL_SUMMARY' && a.type !== 'GLOBAL_IOC_LIST')
             .map(a => `--- Artifact (Phase: ${a.killChainPhase}) ---\n${stringifyArtifactContent(a.content)}`)
             .join('\n\n');
+
+
 
         if (!context.trim()) {
             return res.json({ iocsByPhase: {} });
@@ -383,7 +522,7 @@ ${context}`,
 });
 
 // POST /api/chat-with-assistant
-app.post('/api/chat-with-assistant', async (req, res) => {
+app.post('/api/chat-with-assistant', protect, async (req, res) => {
     try {
         const { userMessage, caseContext } = req.body;
         if (!userMessage || !caseContext) {
@@ -410,7 +549,7 @@ User Message: "${userMessage}"`,
 });
 
 // POST /api/analyze-user-agents
-app.post('/api/analyze-user-agents', async (req, res) => {
+app.post('/api/analyze-user-agents', protect, async (req, res) => {
     try {
         const { userAgentsWithParsedData } = req.body;
         if (!userAgentsWithParsedData) {
@@ -448,3 +587,4 @@ ${formattedData}`,
 app.listen(PORT, () => {
     console.log(`Backend server running on port ${PORT}`);
 });
+
