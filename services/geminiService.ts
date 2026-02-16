@@ -1,5 +1,6 @@
 
 
+
 import { GoogleGenAI, Type } from "@google/genai";
 import type { AnalysisResult, ChecklistItem, KillChainPhase, InvestigationArtifact, IndicatorOfCompromise, ArtifactContent, UserAgentSecurityAnalysis } from '../types.ts';
 
@@ -278,67 +279,24 @@ ${context}`,
     return { iocsByPhase };
 };
 
-export const chatWithCaseAssistant = async (userMessage: string, caseContext: string): Promise<string> => {
+export const chatWithCaseAssistant = async (caseContext: string, userMessage: string): Promise<string> => {
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
-        contents: `You are a world-class senior security analyst AI assistant, named Cyber Sentinel. The user is currently investigating a case. Below is the full context of the case, followed by the user's latest message. Your task is to analyze their message in the context of the case and provide a helpful, concise, and accurate response. You can answer questions, summarize artifacts, suggest investigation steps, and even formulate search queries for the tools mentioned in the 'Investigation Context' artifacts.
+        contents: `You are the Cyber Sentinel Case Assistant, an AI designed to help security analysts with their investigations.
+You have access to the full context of the current case, including all artifacts and notes.
+Your goal is to answer questions, provide insights, and help the analyst connect the dots.
+Be professional, analytical, and concise.
 
---- CASE CONTEXT ---
+Case Context:
 ${caseContext}
---- END CASE CONTEXT ---
 
-User Message: "${userMessage}"`,
+User Message:
+${userMessage}`,
     });
 
     return response.text;
 };
 
-
-const userAgentAnalysesSchema = {
-    type: Type.OBJECT,
-    properties: {
-        analyses: {
-            type: Type.ARRAY,
-            description: "An array of security analyses for the provided User-Agent strings.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    userAgent: { type: Type.STRING, description: "The original User-Agent string being analyzed." },
-                    summary: { type: Type.STRING, description: "A concise summary of potential security risks associated with the User-Agent string. Note if it appears to be a common browser, a bot, a scanner, or indicates an outdated/vulnerable software version." },
-                    risk_level: {
-                        type: Type.STRING,
-                        enum: ["Informational", "Low", "Medium", "High", "Critical"],
-                        description: "Assessment of the security risk level."
-                    },
-                },
-                required: ["userAgent", "summary", "risk_level"]
-            }
-        }
-    },
-    required: ["analyses"]
-};
-
-export const analyzeUserAgentsSecurity = async (userAgentsWithParsedData: { userAgent: string, parsedData: any }[]): Promise<(UserAgentSecurityAnalysis & { userAgent: string })[]> => {
-    const formattedData = userAgentsWithParsedData.map(item => 
-        `User-Agent: "${item.userAgent}"\nParsed Data: ${JSON.stringify(item.parsedData, null, 2)}`
-    ).join('\n---\n');
-    
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `You are a security analyst. I have parsed several User-Agent strings and have some preliminary data, including some security flags. Please analyze each one and provide a concise security summary and risk level. Pay attention to outdated versions, anomalies, and any security flags that are true.
-
-List of User-Agents and their parsed data:
-${formattedData}`,
-        config: {
-            responseMimeType: 'application/json',
-            responseSchema: userAgentAnalysesSchema,
-        }
-    });
-
-    const jsonText = response.text.trim();
-    const result = JSON.parse(jsonText) as { analyses: (UserAgentSecurityAnalysis & { userAgent: string })[] };
-    return result.analyses;
-};
 export interface PowerShellDecodeResult {
     original: string;
     decoded: string;
@@ -365,24 +323,43 @@ export const decodePowerShell = async (commands: string[]): Promise<PowerShellDe
         required: ["results"]
     };
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `You are a security expert. I will provide a list of PowerShell commands, some of which may contain Base64 encoded payloads (often after -EncodedCommand or -e). 
-        Your task is to:
-        1. Identify the encoded part.
-        2. Decode it to plain text.
-        3. Provide a brief explanation of what the command does from a security perspective.
-        If a command is not encoded, still return it with its original text as 'decoded' and explain its purpose.
+    // Batch processing to avoid timeout and handle large amounts of data
+    const batchSize = 5;
+    const allResults: PowerShellDecodeResult[] = [];
 
-        Commands:
-        ${commands.join('\n')}`,
-        config: {
-            responseMimeType: 'application/json',
-            responseSchema: decodeSchema,
+    for (let i = 0; i < commands.length; i += batchSize) {
+        const batch = commands.slice(i, i + batchSize);
+        try {
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: `You are a security expert. I will provide a list of PowerShell commands, some of which may contain Base64 encoded payloads (often after -EncodedCommand or -e). 
+                Your task is to:
+                1. Identify the encoded part.
+                2. Decode it to plain text.
+                3. Provide a brief explanation of what the command does from a security perspective.
+                If a command is not encoded, still return it with its original text as 'decoded' and explain its purpose.
+
+                Commands:
+                ${batch.join('\n')}`,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: decodeSchema,
+                }
+            });
+
+            const jsonText = response.text.trim();
+            const result = JSON.parse(jsonText) as { results: PowerShellDecodeResult[] };
+            allResults.push(...result.results);
+        } catch (error) {
+            console.error(`Error processing batch ${i / batchSize}:`, error);
+            // Push error placeholders if batch fails
+            batch.forEach(cmd => allResults.push({
+                original: cmd,
+                decoded: "ERROR: Decoding failed for this batch",
+                explanation: "Could not process this command due to an AI model error or timeout."
+            }));
         }
-    });
+    }
 
-    const jsonText = response.text.trim();
-    const result = JSON.parse(jsonText) as { results: PowerShellDecodeResult[] };
-    return result.results;
+    return allResults;
 };

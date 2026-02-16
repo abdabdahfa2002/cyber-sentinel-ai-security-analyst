@@ -4,9 +4,53 @@ import { useLocalization } from './contexts/LocalizationContext.tsx';
 import { decodePowerShell, PowerShellDecodeResult } from '../services/geminiService.ts';
 import { CommandLineIcon, ArrowDownTrayIcon, DocumentArrowUpIcon, XMarkIcon } from './icons.tsx';
 
+// Simple CSV parser function to avoid external dependency issues in this environment
+// but with better handling of quotes and commas
+const parseCSV = (text: string): string[][] => {
+    const rows: string[][] = [];
+    let currentRow: string[] = [];
+    let currentCell = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const nextChar = text[i + 1];
+
+        if (char === '"') {
+            if (inQuotes && nextChar === '"') {
+                currentCell += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (char === ',' && !inQuotes) {
+            currentRow.push(currentCell.trim());
+            currentCell = '';
+        } else if ((char === '\r' || char === '\n') && !inQuotes) {
+            if (currentCell !== '' || currentRow.length > 0) {
+                currentRow.push(currentCell.trim());
+                rows.push(currentRow);
+                currentRow = [];
+                currentCell = '';
+            }
+            if (char === '\r' && nextChar === '\n') i++;
+        } else {
+            currentCell += char;
+        }
+    }
+    
+    if (currentCell !== '' || currentRow.length > 0) {
+        currentRow.push(currentCell.trim());
+        rows.push(currentRow);
+    }
+    
+    return rows;
+};
+
 const PSDecoder: React.FC = () => {
     const { t } = useLocalization();
     const [isLoading, setIsLoading] = useState(false);
+    const [progress, setProgress] = useState(0);
     const [results, setResults] = useState<PowerShellDecodeResult[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -16,24 +60,28 @@ const PSDecoder: React.FC = () => {
         const file = event.target.files?.[0];
         if (!file) return;
 
+        // Reset state
+        setResults([]);
+        setError(null);
+        setProgress(0);
+
         const reader = new FileReader();
         reader.onload = async (e) => {
             const text = e.target?.result as string;
             if (!text) return;
 
             try {
-                const lines = text.split('\n').filter(line => line.trim() !== '');
-                if (lines.length < 2) {
+                const allRows = parseCSV(text);
+                if (allRows.length < 2) {
                     setError(t('error_csvParse'));
                     return;
                 }
 
-                const headers = lines[0].split(',').map(h => h.trim());
-                const rows = lines.slice(1).map(line => line.split(',').map(cell => cell.trim()));
+                const headers = allRows[0];
+                const rows = allRows.slice(1);
                 
                 setCsvHeaders(headers);
                 setCsvRows(rows);
-                setError(null);
 
                 // Find PowerShell commands (usually in columns named 'command', 'process', 'arguments', etc.)
                 const commandColIndex = headers.findIndex(h => 
@@ -45,18 +93,31 @@ const PSDecoder: React.FC = () => {
                     return;
                 }
 
-                const commands = rows.map(row => row[commandColIndex]).filter(cmd => cmd && cmd.length > 10);
+                const commandsToProcess = rows
+                    .map(row => row[commandColIndex])
+                    .filter(cmd => cmd && cmd.length > 5);
                 
-                if (commands.length === 0) {
+                if (commandsToProcess.length === 0) {
                     setError(t('error_noPowerShellFound'));
                     return;
                 }
 
                 setIsLoading(true);
-                const decodeResults = await decodePowerShell(commands);
-                setResults(decodeResults);
+                
+                // Process in smaller batches manually here to update progress bar
+                const batchSize = 5;
+                const finalResults: PowerShellDecodeResult[] = [];
+                
+                for (let i = 0; i < commandsToProcess.length; i += batchSize) {
+                    const batch = commandsToProcess.slice(i, i + batchSize);
+                    const batchResults = await decodePowerShell(batch);
+                    finalResults.push(...batchResults);
+                    setProgress(Math.min(Math.round(((i + batch.length) / commandsToProcess.length) * 100), 100));
+                }
+                
+                setResults(finalResults);
             } catch (err) {
-                console.error(err);
+                console.error("CSV Processing Error:", err);
                 setError(t('error_csvParse'));
             } finally {
                 setIsLoading(false);
@@ -75,13 +136,18 @@ const PSDecoder: React.FC = () => {
             /command|process|args|argument|line/i.test(h)
         );
 
+        const escapeCSV = (val: string) => `"${val.replace(/"/g, '""')}"`;
+
         const newRows = csvRows.map(row => {
             const originalCmd = row[commandColIndex];
             const decodeResult = results.find(r => r.original === originalCmd);
+            
+            const escapedRow = row.map(cell => escapeCSV(cell));
+            
             return [
-                ...row,
-                decodeResult ? `"${decodeResult.decoded.replace(/"/g, '""')}"` : '""',
-                decodeResult ? `"${decodeResult.explanation.replace(/"/g, '""')}"` : '""'
+                ...escapedRow,
+                decodeResult ? escapeCSV(decodeResult.decoded) : '""',
+                decodeResult ? escapeCSV(decodeResult.explanation) : '""'
             ];
         });
 
@@ -132,9 +198,16 @@ const PSDecoder: React.FC = () => {
                 )}
 
                 {isLoading && (
-                    <div className="mt-8 text-center py-12">
-                        <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-sentinel-blue mb-4"></div>
-                        <p className="text-gray-300 font-medium">{t('decoding')}</p>
+                    <div className="mt-8 space-y-4">
+                        <div className="w-full bg-sentinel-gray-dark rounded-full h-4 overflow-hidden">
+                            <div 
+                                className="bg-sentinel-blue h-full transition-all duration-500 ease-out"
+                                style={{ width: `${progress}%` }}
+                            ></div>
+                        </div>
+                        <div className="text-center">
+                            <p className="text-gray-300 font-medium">{t('decoding')} ({progress}%)</p>
+                        </div>
                     </div>
                 )}
 
