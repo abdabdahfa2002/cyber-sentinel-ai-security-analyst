@@ -1,10 +1,9 @@
 
-
 import React from 'react';
-import { BrainIcon, ShieldExclamationIcon, CodeBracketSquareIcon, RssIcon, BriefcaseIcon, FingerPrintIcon } from './icons';
+import { BrainIcon, ShieldExclamationIcon, CodeBracketSquareIcon, RssIcon, BriefcaseIcon, FingerPrintIcon, CommandLineIcon } from './icons';
 import { useLocalization } from './contexts/LocalizationContext.tsx';
 
-export type View = 'ai_analyst' | 'vt_scanner' | 'casebook' | 'ua_analyzer';
+export type View = 'ai_analyst' | 'vt_scanner' | 'casebook' | 'ua_analyzer' | 'ps_decoder';
 
 interface MenuItem {
   id: View | string;
@@ -21,6 +20,7 @@ const MainMenu: React.FC<{ activeView: View; setActiveView: (view: View) => void
     { id: 'ai_analyst', labelKey: 'newInvestigation', Icon: BrainIcon, enabled: true },
     { id: 'vt_scanner', labelKey: 'vtScanner', Icon: ShieldExclamationIcon, enabled: true },
     { id: 'ua_analyzer', labelKey: 'uaAnalyzer', Icon: FingerPrintIcon, enabled: true },
+    { id: 'ps_decoder', labelKey: 'psDecoder', Icon: CommandLineIcon, enabled: true },
     { id: 'vuln_scanner', labelKey: 'vulnScanner', Icon: CodeBracketSquareIcon, enabled: false },
     { id: 'threat_intel', labelKey: 'threatIntel', Icon: RssIcon, enabled: false },
   ];

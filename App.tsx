@@ -1,11 +1,11 @@
 
-
 import React, { useState, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import MainMenu, { View } from './components/MainMenu';
 import AIAnalyst from './components/AIAnalyst';
 import VTScanner from './components/VTScanner';
 import UserAgentAnalyzer from './components/UserAgentAnalyzer';
+import PSDecoder from './components/PSDecoder';
 import Casebook from './components/Casebook';
 import CaseDetailView from './components/CaseDetailView';
 import { generatePhaseIndex, generateGlobalSummary, generateGlobalIoCs, chatWithCaseAssistant } from './services/geminiService';
@@ -293,128 +293,126 @@ const App: React.FC = () => {
       }));
   };
 
-  const handleAnalysisComplete = useCallback((caseId: string | null, analysis: AnalysisResult) => {
-    const newArtifact: Omit<InvestigationArtifact, 'id' | 'createdAt'> = {
-        type: 'AI_ANALYSIS',
-        title: 'AI Initial Analysis',
-        content: analysis,
-        killChainPhase: 'Reconnaissance',
+  const handleSendMessage = async (caseId: string, text: string) => {
+    const targetCase = cases.find(c => c.id === caseId);
+    if (!targetCase) return;
+
+    const userMsg: ChatMessage = {
+        id: `msg-user-${Date.now()}`,
+        sender: 'user',
+        text: text,
+        timestamp: new Date().toISOString()
     };
 
-    if (caseId) {
-      handleAddArtifact(caseId, newArtifact);
-      setSelectedCaseId(caseId);
-      setActiveView('casebook');
-    } else {
-      const newCaseName = `Untitled Analysis - ${new Date().toLocaleDateString()}`;
-      const newCase: Case = {
-        id: `case-${Date.now()}`,
-        name: newCaseName,
-        description: 'Case automatically created from a new investigation.',
-        status: 'New',
-        createdAt: new Date().toISOString(),
-        artifacts: [{
-          ...newArtifact,
-          id: `art-${Date.now()}`,
-          createdAt: new Date().toISOString(),
-        }],
-        investigationChecklist: [],
-        chatHistory: [],
-      };
-      setCases(prev => [newCase, ...prev]);
-      setSelectedCaseId(newCase.id);
-      setActiveView('casebook');
-      setTimeout(() => {
-        triggerPhaseIndexer(newCase.id, 'Reconnaissance');
-        triggerGlobalIndexers(newCase.id);
-      }, 0);
-    }
-  }, [handleAddArtifact, triggerPhaseIndexer, triggerGlobalIndexers]);
-  
-  const handleSendMessage = async (caseId: string, userMessage: string) => {
-    const newUserMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      sender: 'user',
-      text: userMessage,
-      timestamp: new Date().toISOString(),
-    };
+    setCases(prev => prev.map(c => 
+        c.id === caseId ? { ...c, chatHistory: [...c.chatHistory, userMsg] } : c
+    ));
 
-    // Immediately add user message to the UI
-    setCases(prev => prev.map(c => c.id === caseId ? { ...c, chatHistory: [...c.chatHistory, newUserMessage] } : c));
     setIsChatLoading(true);
-
     try {
-      const targetCase = cases.find(c => c.id === caseId);
-      if (!targetCase) throw new Error("Case not found");
+        const caseContext = `
+            Case Name: ${targetCase.name}
+            Description: ${targetCase.description}
+            Artifacts: ${JSON.stringify(targetCase.artifacts)}
+            Current Chat History: ${JSON.stringify(targetCase.chatHistory)}
+        `;
+        const responseText = await chatWithCaseAssistant(caseContext, text);
+        
+        const aiMsg: ChatMessage = {
+            id: `msg-ai-${Date.now()}`,
+            sender: 'ai',
+            text: responseText,
+            timestamp: new Date().toISOString()
+        };
 
-      const caseContext = JSON.stringify(targetCase); // Send the whole case object
-      const aiResponseText = await chatWithCaseAssistant(userMessage, caseContext);
-
-      const newAiMessage: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
-        sender: 'ai',
-        text: aiResponseText,
-        timestamp: new Date().toISOString(),
-      };
-
-      setCases(prev => prev.map(c => c.id === caseId ? { ...c, chatHistory: [...c.chatHistory, newAiMessage] } : c));
-
+        setCases(prev => prev.map(c => 
+            c.id === caseId ? { ...c, chatHistory: [...c.chatHistory, aiMsg] } : c
+        ));
     } catch (error) {
-      console.error("Chat error:", error);
-      const errorMessage: ChatMessage = {
-        id: `msg-err-${Date.now()}`,
-        sender: 'ai',
-        text: "Sorry, I encountered an error. Please try again.",
-        timestamp: new Date().toISOString(),
-      };
-      setCases(prev => prev.map(c => c.id === caseId ? { ...c, chatHistory: [...c.chatHistory, errorMessage] } : c));
+        console.error("Chat failed:", error);
     } finally {
-      setIsChatLoading(false);
+        setIsChatLoading(false);
     }
   };
 
 
-  const renderContent = () => {
-    if (activeView === 'vt_scanner') return <VTScanner />;
-    if (activeView === 'ua_analyzer') return <UserAgentAnalyzer />;
-    
-    if (activeView === 'ai_analyst') {
-      return <AIAnalyst activeCase={selectedCase} onAnalysisComplete={handleAnalysisComplete} setActiveView={setActiveView} />;
+  const renderView = () => {
+    if (selectedCaseId && selectedCase) {
+        return (
+            <CaseDetailView 
+                caseData={selectedCase} 
+                onBack={() => setSelectedCaseId(null)} 
+                onAddArtifact={(art) => handleAddArtifact(selectedCaseId, art)}
+                onUpdateArtifact={(artId, updates) => handleUpdateArtifact(selectedCaseId, artId, updates)}
+                onUpdateChecklist={(steps) => handleUpdateChecklist(selectedCaseId, steps)}
+                onToggleChecklistItem={(step) => handleToggleChecklistItem(selectedCaseId, step)}
+                onStartNewAnalysis={() => {
+                    setSelectedCaseId(null);
+                    setActiveView('ai_analyst');
+                }}
+                onSplitAndOrganizeArtifact={(origId, data) => handleSplitAndOrganizeArtifact(selectedCaseId, origId, data)}
+                onSendMessage={(msg) => handleSendMessage(selectedCaseId, msg)}
+                isChatLoading={isChatLoading}
+            />
+        );
     }
 
-    if (selectedCase) {
-        return <CaseDetailView 
-                  caseData={selectedCase} 
-                  onBack={() => setSelectedCaseId(null)}
-                  onAddArtifact={(artifact) => handleAddArtifact(selectedCase.id, artifact)}
-                  onUpdateArtifact={(artifactId, updates) => handleUpdateArtifact(selectedCase.id, artifactId, updates)}
-                  onUpdateChecklist={(checklist) => handleUpdateChecklist(selectedCase.id, checklist)}
-                  onToggleChecklistItem={(step) => handleToggleChecklistItem(selectedCase.id, step)}
-                  onStartNewAnalysis={() => {
-                      setSelectedCaseId(selectedCase.id);
-                      setActiveView('ai_analyst');
-                  }}
-                  onSplitAndOrganizeArtifact={(originalArtifactId, newArtifactsData) => handleSplitAndOrganizeArtifact(selectedCase.id, originalArtifactId, newArtifactsData)}
-                  onSendMessage={(message) => handleSendMessage(selectedCase.id, message)}
-                  isChatLoading={isChatLoading}
-               />;
-    }
-    return <Casebook 
+    switch (activeView) {
+      case 'casebook':
+        return (
+          <Casebook 
             cases={cases} 
-            onSelectCase={setSelectedCaseId} 
             onCreateCase={handleCreateCase} 
-          />;
+            onSelectCase={setSelectedCaseId}
+          />
+        );
+      case 'ai_analyst':
+        return <AIAnalyst onAnalysisComplete={(res) => {
+            // This is for a "standalone" analysis that creates a new case
+            const newCaseDetails: NewCaseDetails = {
+                name: `Analysis: ${res.summary.substring(0, 30)}...`,
+                description: res.summary,
+                summary: res.summary
+            };
+            handleCreateCase(newCaseDetails);
+            // The initial artifacts will be added by handleCreateCase, but we need the AI analysis specifically
+            setCases(prev => prev.map(c => {
+                if (c.name === newCaseDetails.name) {
+                    const aiArtifact: InvestigationArtifact = {
+                        id: `art-ai-${Date.now()}`,
+                        type: 'AI_ANALYSIS',
+                        title: 'Initial AI Analysis',
+                        content: res,
+                        createdAt: new Date().toISOString(),
+                        killChainPhase: 'Uncategorized'
+                    };
+                    return { ...c, artifacts: [aiArtifact, ...c.artifacts] };
+                }
+                return c;
+            }));
+        }} />;
+      case 'vt_scanner':
+        return <VTScanner />;
+      case 'ua_analyzer':
+        return <UserAgentAnalyzer />;
+      case 'ps_decoder':
+        return <PSDecoder />;
+      default:
+        return <Casebook cases={cases} onCreateCase={handleCreateCase} onSelectCase={setSelectedCaseId} />;
+    }
   };
 
   return (
-    <div dir={direction} className="min-h-screen bg-sentinel-gray-dark text-gray-200 font-sans">
+    <div className="min-h-screen bg-sentinel-gray-dark text-gray-100 font-sans selection:bg-sentinel-blue/30" dir={direction}>
       <Header />
-      <main className="container mx-auto p-4 md:p-8">
-        <MainMenu activeView={activeView} setActiveView={handleSetView} />
-        <div className="mt-8">
-          {renderContent()}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <MainMenu activeView={activeView} setActiveView={handleSetView} />
         </div>
+        {renderView()}
       </main>
+      
+      {/* Global Toast / Notification Container could go here */}
     </div>
   );
 };

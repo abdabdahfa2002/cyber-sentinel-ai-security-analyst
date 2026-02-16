@@ -1,5 +1,4 @@
 
-
 import React, { createContext, useState, useContext, useEffect, useMemo } from 'react';
 
 type Locale = 'en' | 'ar';
@@ -21,6 +20,7 @@ const translations: Record<Locale, Translations> = {
     newInvestigation: 'New Investigation',
     vtScanner: 'VirusTotal Scanner',
     uaAnalyzer: 'User-Agent Analyzer',
+    psDecoder: 'PowerShell Decoder',
     vulnScanner: 'Vulnerability Scanner',
     threatIntel: 'Threat Intel Feed',
     soon: 'Soon',
@@ -250,6 +250,18 @@ const translations: Record<Locale, Translations> = {
     known_ransomware: 'Known Ransomware',
     known_spyware: 'Known Spyware',
     known_keylogger: 'Known Keylogger',
+    // PowerShell Decoder
+    psDecoder_desc: 'Extract and decode Base64 encoded PowerShell commands from CSV logs using Gemini AI.',
+    uploadCsv: 'Upload CSV File',
+    decoding: 'Decoding...',
+    decodeResults: 'Decoding Results',
+    downloadDecodedCsv: 'Download Decoded CSV',
+    originalCommand: 'Original Command',
+    decodedCommand: 'Decoded Command',
+    aiExplanation: 'AI Explanation',
+    error_csvParse: 'Failed to parse CSV file. Please ensure it is a valid CSV.',
+    error_noPowerShellFound: 'No encoded PowerShell commands found in the CSV.',
+    error_decodingFailed: 'Failed to decode some commands. Gemini might be unavailable.',
   },
   ar: {
     cyberSentinel: 'الحارس السيبراني',
@@ -258,6 +270,7 @@ const translations: Record<Locale, Translations> = {
     newInvestigation: 'تحقيق جديد',
     vtScanner: 'فاحص VirusTotal',
     uaAnalyzer: 'محلل وكيل المستخدم',
+    psDecoder: 'مفكك شفرة PowerShell',
     vulnScanner: 'فاحص الثغرات',
     threatIntel: 'تغذية معلومات التهديدات',
     soon: 'قريباً',
@@ -487,6 +500,18 @@ const translations: Record<Locale, Translations> = {
     known_ransomware: 'برامج فدية معروفة',
     known_spyware: 'برامج تجسس معروفة',
     known_keylogger: 'مسجل نقرات مفاتيح معروف',
+    // PowerShell Decoder
+    psDecoder_desc: 'استخراج وفك تشفير أوامر PowerShell المشفرة بـ Base64 من سجلات CSV باستخدام ذكاء Gemini الاصطناعي.',
+    uploadCsv: 'رفع ملف CSV',
+    decoding: 'جاري فك التشفير...',
+    decodeResults: 'نتائج فك التشفير',
+    downloadDecodedCsv: 'تحميل ملف CSV بعد فك التشفير',
+    originalCommand: 'الأمر الأصلي',
+    decodedCommand: 'الأمر بعد فك التشفير',
+    aiExplanation: 'شرح الذكاء الاصطناعي',
+    error_csvParse: 'فشل في تحليل ملف CSV. يرجى التأكد من أنه ملف CSV صالح.',
+    error_noPowerShellFound: 'لم يتم العثور على أوامر PowerShell مشفرة في ملف CSV.',
+    error_decodingFailed: 'فشل فك تشفير بعض الأوامر. قد يكون Gemini غير متاح.',
   },
 };
 

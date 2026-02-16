@@ -339,3 +339,50 @@ ${formattedData}`,
     const result = JSON.parse(jsonText) as { analyses: (UserAgentSecurityAnalysis & { userAgent: string })[] };
     return result.analyses;
 };
+export interface PowerShellDecodeResult {
+    original: string;
+    decoded: string;
+    explanation: string;
+}
+
+export const decodePowerShell = async (commands: string[]): Promise<PowerShellDecodeResult[]> => {
+    const decodeSchema = {
+        type: Type.OBJECT,
+        properties: {
+            results: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        original: { type: Type.STRING },
+                        decoded: { type: Type.STRING },
+                        explanation: { type: Type.STRING }
+                    },
+                    required: ["original", "decoded", "explanation"]
+                }
+            }
+        },
+        required: ["results"]
+    };
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: `You are a security expert. I will provide a list of PowerShell commands, some of which may contain Base64 encoded payloads (often after -EncodedCommand or -e). 
+        Your task is to:
+        1. Identify the encoded part.
+        2. Decode it to plain text.
+        3. Provide a brief explanation of what the command does from a security perspective.
+        If a command is not encoded, still return it with its original text as 'decoded' and explain its purpose.
+
+        Commands:
+        ${commands.join('\n')}`,
+        config: {
+            responseMimeType: 'application/json',
+            responseSchema: decodeSchema,
+        }
+    });
+
+    const jsonText = response.text.trim();
+    const result = JSON.parse(jsonText) as { results: PowerShellDecodeResult[] };
+    return result.results;
+};
