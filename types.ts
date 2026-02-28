@@ -1,5 +1,6 @@
 
 
+
 export type KillChainPhase =
   | 'Reconnaissance'
   | 'Weaponization'
@@ -46,6 +47,7 @@ export interface Case {
   artifacts: InvestigationArtifact[];
   investigationChecklist: ChecklistItem[];
   chatHistory: ChatMessage[];
+  timelineEvents?: TimelineEvent[];
 }
 
 // For the new comprehensive case creation modal
@@ -82,8 +84,15 @@ export interface ChecklistItem {
 }
 
 export interface TimelineEvent {
+  id?: string;
   timestamp: string;
   event: string;
+  description?: string; // Detailed description of the event
+  host?: string; // Host or system affected
+  severity?: 'Low' | 'Medium' | 'High' | 'Critical';
+  category?: string; // Event category (e.g., Login, File Access, Network)
+  source?: string; // Source of the event
+  details?: Record<string, string>; // Additional custom fields
 }
 
 export interface AnalysisResult {

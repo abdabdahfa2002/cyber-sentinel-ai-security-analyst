@@ -9,7 +9,7 @@ import UserAgentAnalyzer from './components/UserAgentAnalyzer';
 import Casebook from './components/Casebook';
 import CaseDetailView from './components/CaseDetailView';
 import { generatePhaseIndex, generateGlobalSummary, generateGlobalIoCs, chatWithCaseAssistant } from './services/geminiService';
-import type { Case, InvestigationArtifact, AnalysisResult, KillChainPhase, ChecklistItem, ArtifactContent, NewCaseDetails, ChatMessage } from './types';
+import type { Case, InvestigationArtifact, AnalysisResult, KillChainPhase, ChecklistItem, ArtifactContent, NewCaseDetails, ChatMessage, TimelineEvent } from './types';
 import { useLocalization } from './components/contexts/LocalizationContext.tsx';
 
 
@@ -373,6 +373,44 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAddTimelineEvent = (caseId: string, event: TimelineEvent) => {
+    setCases(prev => prev.map(c => {
+      if (c.id === caseId) {
+        const newEvent: TimelineEvent = {
+          ...event,
+          id: event.id || `event-${Date.now()}`,
+        };
+        return { ...c, timelineEvents: [...(c.timelineEvents || []), newEvent] };
+      }
+      return c;
+    }));
+  };
+
+  const handleUpdateTimelineEvent = (caseId: string, eventId: string, event: TimelineEvent) => {
+    setCases(prev => prev.map(c => {
+      if (c.id === caseId) {
+        return {
+          ...c,
+          timelineEvents: (c.timelineEvents || []).map(e => e.id === eventId ? event : e),
+        };
+      }
+      return c;
+    }));
+  };
+
+  const handleDeleteTimelineEvent = (caseId: string, eventId: string) => {
+    setCases(prev => prev.map(c => {
+      if (c.id === caseId) {
+        return {
+          ...c,
+          timelineEvents: (c.timelineEvents || []).filter(e => e.id !== eventId),
+        };
+      }
+      return c;
+    }));
+  };
+
+
 
   const renderContent = () => {
     if (activeView === 'vt_scanner') return <VTScanner />;
@@ -397,6 +435,9 @@ const App: React.FC = () => {
                   onSplitAndOrganizeArtifact={(originalArtifactId, newArtifactsData) => handleSplitAndOrganizeArtifact(selectedCase.id, originalArtifactId, newArtifactsData)}
                   onSendMessage={(message) => handleSendMessage(selectedCase.id, message)}
                   isChatLoading={isChatLoading}
+                  onAddTimelineEvent={(event) => handleAddTimelineEvent(selectedCase.id, event)}
+                  onUpdateTimelineEvent={(eventId, event) => handleUpdateTimelineEvent(selectedCase.id, eventId, event)}
+                  onDeleteTimelineEvent={(eventId) => handleDeleteTimelineEvent(selectedCase.id, eventId)}
                />;
     }
     return <Casebook 

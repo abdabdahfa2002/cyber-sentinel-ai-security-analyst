@@ -1,14 +1,17 @@
 
 
 import React, { useState } from 'react';
-import type { Case, InvestigationArtifact, KillChainPhase, ChecklistItem, ChatMessage } from '../types.ts';
+import type { Case, InvestigationArtifact, KillChainPhase, ChecklistItem, ChatMessage, TimelineEvent } from '../types.ts';
 import { suggestNextSteps, SplitArtifactResult } from '../services/geminiService.ts';
-import { ArrowLeftIcon, BrainIcon, PlusIcon, LightBulbIcon, Cog6ToothIcon, InboxStackIcon, FolderOpenIcon, ListBulletIcon, DocumentTextIcon, ChatBubbleLeftRightIcon } from './icons';
+import { ArrowLeftIcon, BrainIcon, PlusIcon, LightBulbIcon, Cog6ToothIcon, InboxStackIcon, FolderOpenIcon, ListBulletIcon, DocumentTextIcon, ChatBubbleLeftRightIcon, ClockIcon } from './icons';
 import ArtifactCard from './ArtifactCard';
 import AddArtifactModal from './AddArtifactModal';
 import SplitArtifactModal from './SplitArtifactModal';
 import InvestigationChecklist from './InvestigationChecklist';
 import CaseAssistantChat from './CaseAssistantChat';
+import TimelineSection from './TimelineSection';
+import FullTimelineView from './FullTimelineView';
+import TimelineEventAnalyzer from './TimelineEventAnalyzer';
 import { useLocalization } from './contexts/LocalizationContext.tsx';
 
 interface CaseDetailViewProps {
@@ -22,6 +25,9 @@ interface CaseDetailViewProps {
     onSplitAndOrganizeArtifact: (originalArtifactId: string, newArtifactsData: SplitArtifactResult[]) => void;
     onSendMessage: (message: string) => Promise<void>;
     isChatLoading: boolean;
+    onAddTimelineEvent?: (event: TimelineEvent) => void;
+    onUpdateTimelineEvent?: (eventId: string, event: TimelineEvent) => void;
+    onDeleteTimelineEvent?: (eventId: string) => void;
 }
 
 const KILL_CHAIN_PHASES: KillChainPhase[] = ['Reconnaissance', 'Weaponization', 'Delivery', 'Exploitation', 'Installation', 'Command and Control', 'Actions on Objectives'];
@@ -40,12 +46,14 @@ const Section: React.FC<{ title: React.ReactNode; icon: React.ReactNode; childre
 
 const CaseDetailView: React.FC<CaseDetailViewProps> = (props) => {
     const { t } = useLocalization();
-    const { caseData, onBack, onAddArtifact, onUpdateChecklist, onToggleChecklistItem, onStartNewAnalysis, onSplitAndOrganizeArtifact, onSendMessage, isChatLoading } = props;
+    const { caseData, onBack, onAddArtifact, onUpdateChecklist, onToggleChecklistItem, onStartNewAnalysis, onSplitAndOrganizeArtifact, onSendMessage, isChatLoading, onAddTimelineEvent, onUpdateTimelineEvent, onDeleteTimelineEvent } = props;
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
     const [selectedPhase, setSelectedPhase] = useState<KillChainPhase | null>(null);
     const [artifactToOrganize, setArtifactToOrganize] = useState<InvestigationArtifact | null>(null);
     const [isSuggestingSteps, setIsSuggestingSteps] = useState(false);
+    const [isFullTimelineOpen, setIsFullTimelineOpen] = useState(false);
+    const [isTimelineAnalyzerOpen, setIsTimelineAnalyzerOpen] = useState(false);
 
     const handleOpenAddModal = (phase: KillChainPhase) => {
         setSelectedPhase(phase);
@@ -103,6 +111,25 @@ const CaseDetailView: React.FC<CaseDetailViewProps> = (props) => {
             {isSplitModalOpen && artifactToOrganize && (
                 <SplitArtifactModal artifact={artifactToOrganize} onClose={() => setIsSplitModalOpen(false)} onConfirmSplit={handleConfirmSplit} />
             )}
+            {isFullTimelineOpen && (
+                <FullTimelineView
+                    events={caseData.timelineEvents || []}
+                    onClose={() => setIsFullTimelineOpen(false)}
+                    onAddEvent={onAddTimelineEvent}
+                    onUpdateEvent={onUpdateTimelineEvent}
+                    onDeleteEvent={onDeleteTimelineEvent}
+                />
+            )}
+            {isTimelineAnalyzerOpen && (
+                <TimelineEventAnalyzer
+                    onClose={() => setIsTimelineAnalyzerOpen(false)}
+                    onAddEvents={(events) => {
+                        events.forEach(event => onAddTimelineEvent?.(event));
+                        setIsTimelineAnalyzerOpen(false);
+                    }}
+                />
+            )}
+
 
             <div className="animate-fade-in space-y-6">
                 <div>
@@ -153,7 +180,28 @@ const CaseDetailView: React.FC<CaseDetailViewProps> = (props) => {
                 >
                     <InvestigationChecklist items={caseData.investigationChecklist} onToggleItem={onToggleChecklistItem} />
                 </Section>
-                
+
+                <Section 
+                    title={t('timeline')}
+                    icon={<ClockIcon className="h-6 w-6 me-3 text-sentinel-blue" />}
+                    actionButton={
+                        <button 
+                            onClick={() => setIsTimelineAnalyzerOpen(true)}
+                            className="flex items-center text-sm bg-sentinel-blue/80 hover:bg-sentinel-blue text-white px-3 py-1 rounded-md transition"
+                        >
+                            <PlusIcon className="h-4 w-4 me-1" /> {t('analyzeWithAI')}
+                        </button>
+                    }
+                >
+                    <TimelineSection 
+                        events={caseData.timelineEvents || []}
+                        onAddEvent={onAddTimelineEvent}
+                        onUpdateEvent={onUpdateTimelineEvent}
+                        onDeleteEvent={onDeleteTimelineEvent}
+                        onOpenFullTimeline={() => setIsFullTimelineOpen(true)}
+                    />
+                </Section>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <Section title={t('investigationContext')} icon={<Cog6ToothIcon className="h-6 w-6 me-3 text-sentinel-blue" />} actionButton={<button onClick={() => handleOpenAddModal('Uncategorized')} className="flex items-center text-sm bg-sentinel-gray-dark hover:bg-sentinel-gray-light text-white px-3 py-1 rounded-md transition"><PlusIcon className="h-4 w-4 me-1" /> {t('addToolInfo')}</button>}>
                         {toolInfoArtifacts.length > 0 ? (
