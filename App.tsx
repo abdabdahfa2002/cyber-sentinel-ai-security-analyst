@@ -1,5 +1,3 @@
-
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { useAuth } from './components/contexts/AuthContext';
 import { fetchCases, createCase, updateCase } from './services/caseService';
@@ -22,7 +20,7 @@ const AppContent: React.FC = () => {
   const { direction } = useLocalization();
   const [activeView, setActiveView] = useState<View>('casebook');
   
-  const { token, isAuthenticated, logout } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const [cases, setCases] = useState<Case[]>([]);
   const [isCasesLoading, setIsCasesLoading] = useState(true);
   
@@ -40,8 +38,6 @@ const AppContent: React.FC = () => {
         .catch(error => {
           console.error("Failed to fetch cases:", error);
           setIsCasesLoading(false);
-          // Optional: logout if token is invalid
-          // logout();
         });
     } else {
       setCases([]);
@@ -49,35 +45,13 @@ const AppContent: React.FC = () => {
     }
   }, [isAuthenticated, token]);
 
-  const selectedCase = cases.find(c => c.id === selectedCaseId) || null;
+  const selectedCase = cases.find(c => c.id === selectedCaseId || (c as any)._id === selectedCaseId) || null;
   
-  const triggerGlobalIndexers = useCallback((caseId: string) => {
-    if (!token) return;
-    setCases(prevCases => {
-        const targetCase = prevCases.find(c => c.id === caseId);
-        if (!targetCase) return prevCases;
-
-        const allButGlobalArtifacts = targetCase.artifacts.filter(a => a.type !== 'GLOBAL_SUMMARY' && a.type !== 'GLOBAL_IOC_LIST');
-        const caseContext = `Case: ${targetCase.name}\nDescription: ${targetCase.description}\nArtifacts:\n${JSON.stringify(allButGlobalArtifacts)}`;
-
-        // Trigger Global Summary
-        generateGlobalSummary(caseContext, token).then(summary => {
-            updateGlobalArtifact(caseId, 'GLOBAL_SUMMARY', 'Global Attack Summary', { text: summary });
-        });
-
-        // Trigger Global IoC List
-        generateGlobalIoCs(allButGlobalArtifacts, token).then(iocs => {
-            updateGlobalArtifact(caseId, 'GLOBAL_IOC_LIST', 'Global IoC Repository', iocs);
-        });
-
-        return prevCases;
-    });
-  }, []);
-
   const updateGlobalArtifact = (caseId: string, type: 'GLOBAL_SUMMARY' | 'GLOBAL_IOC_LIST', title: string, content: ArtifactContent) => {
     if (!token) return;
       setCases(currentCases => currentCases.map(c => {
-          if (c.id === caseId) {
+          const cid = (c as any)._id || c.id;
+          if (cid === caseId) {
               const existingIndex = c.artifacts.find(a => a.type === type);
               if (existingIndex) {
                   const updatedArtifacts = c.artifacts.map(a => 
@@ -91,7 +65,7 @@ const AppContent: React.FC = () => {
                       title: title,
                       content: content,
                       createdAt: new Date().toISOString(),
-                      killChainPhase: 'Uncategorized', // Global artifacts don't belong to a phase
+                      killChainPhase: 'Uncategorized',
                   };
                   return { ...c, artifacts: [newIndex, ...c.artifacts] };
               }
@@ -100,42 +74,57 @@ const AppContent: React.FC = () => {
       }));
   };
 
-  const triggerPhaseIndexer = useCallback(async (caseId: string, phase: KillChainPhase) => {
-    if (phase === 'Uncategorized') return;
+  const triggerGlobalIndexers = useCallback((caseId: string) => {
+    if (!token) return;
+    const targetCase = cases.find(c => (c as any)._id === caseId || c.id === caseId);
+    if (!targetCase) return;
 
-    setCases(prevCases => {
-        const targetCase = prevCases.find(c => c.id === caseId);
-        if (!targetCase) return prevCases;
+    const allButGlobalArtifacts = targetCase.artifacts.filter(a => a.type !== 'GLOBAL_SUMMARY' && a.type !== 'GLOBAL_IOC_LIST');
+    const caseContext = `Case: ${targetCase.name}\nDescription: ${targetCase.description}\nArtifacts:\n${JSON.stringify(allButGlobalArtifacts)}`;
 
-        const phaseArtifacts = targetCase.artifacts.filter(a => a.killChainPhase === phase && a.type !== 'CASE_INDEX');
-        
-        generatePhaseIndex(phaseArtifacts, token).then(summary => {
-            setCases(currentCases => currentCases.map(c => {
-                if (c.id === caseId) {
-                    const existingIndex = c.artifacts.find(a => a.killChainPhase === phase && a.type === 'CASE_INDEX');
-                    if (existingIndex) {
-                        const updatedArtifacts = c.artifacts.map(a => 
-                            a.id === existingIndex.id ? { ...a, content: { text: summary } } : a
-                        );
-                        return { ...c, artifacts: updatedArtifacts };
-                    } else {
-                        const newIndex: InvestigationArtifact = {
-                            id: `idx-${phase}-${Date.now()}`,
-                            type: 'CASE_INDEX',
-                            title: `${phase} Phase Summary`,
-                            content: { text: summary },
-                            createdAt: new Date().toISOString(),
-                            killChainPhase: phase,
-                        };
-                        return { ...c, artifacts: [newIndex, ...c.artifacts] };
-                    }
-                }
-                return c;
-            }));
-        });
-        return prevCases;
+    generateGlobalSummary(caseContext).then(summary => {
+        updateGlobalArtifact(caseId, 'GLOBAL_SUMMARY', 'Global Attack Summary', { text: summary });
     });
-  }, []);
+
+    generateGlobalIoCs(allButGlobalArtifacts).then(iocs => {
+        updateGlobalArtifact(caseId, 'GLOBAL_IOC_LIST', 'Global IoC Repository', iocs as any);
+    });
+  }, [token, cases]);
+
+  const triggerPhaseIndexer = useCallback(async (caseId: string, phase: KillChainPhase) => {
+    if (phase === 'Uncategorized' || !token) return;
+
+    const targetCase = cases.find(c => (c as any)._id === caseId || c.id === caseId);
+    if (!targetCase) return;
+
+    const phaseArtifacts = targetCase.artifacts.filter(a => a.killChainPhase === phase && a.type !== 'CASE_INDEX');
+    
+    generatePhaseIndex(phaseArtifacts).then(summary => {
+        setCases(currentCases => currentCases.map(c => {
+            const cid = (c as any)._id || c.id;
+            if (cid === caseId) {
+                const existingIndex = c.artifacts.find(a => a.killChainPhase === phase && a.type === 'CASE_INDEX');
+                if (existingIndex) {
+                    const updatedArtifacts = c.artifacts.map(a => 
+                        a.id === existingIndex.id ? { ...a, content: { text: summary } } : a
+                    );
+                    return { ...c, artifacts: updatedArtifacts };
+                } else {
+                    const newIndex: InvestigationArtifact = {
+                        id: `idx-${phase}-${Date.now()}`,
+                        type: 'CASE_INDEX',
+                        title: `${phase} Phase Summary`,
+                        content: { text: summary },
+                        createdAt: new Date().toISOString(),
+                        killChainPhase: phase,
+                    };
+                    return { ...c, artifacts: [newIndex, ...c.artifacts] };
+                }
+            }
+            return c;
+        }));
+    });
+  }, [token, cases]);
 
   const handleSetView = (view: View) => {
     if (view !== 'casebook') {
@@ -195,31 +184,39 @@ const AppContent: React.FC = () => {
     createCase(newCaseData, token!)
       .then(newCase => {
         setCases(prev => [newCase, ...prev]);
-        setSelectedCaseId(newCase._id); // Use _id from DB
-        triggerGlobalIndexers(newCase._id);
+        const cid = (newCase as any)._id || newCase.id;
+        setSelectedCaseId(cid);
+        triggerGlobalIndexers(cid);
       })
       .catch(error => console.error("Failed to create case on server:", error));
   };
 
   const handleAddArtifact = useCallback((caseId: string, artifact: Omit<InvestigationArtifact, 'id' | 'createdAt'>) => {
-    const updatedArtifacts = [...selectedCase!.artifacts, newArtifact];
+    if (!selectedCase) return;
+    const newArt: InvestigationArtifact = {
+        ...artifact,
+        id: `art-${Date.now()}`,
+        createdAt: new Date().toISOString()
+    };
+    const updatedArtifacts = [...selectedCase.artifacts, newArt];
     updateCase(caseId, { artifacts: updatedArtifacts }, token!)
       .then(updatedCase => {
-        setCases(prev => prev.map(c => c._id === caseId ? updatedCase : c));
+        setCases(prev => prev.map(c => ((c as any)._id === caseId || c.id === caseId) ? updatedCase : c));
         setTimeout(() => {
-            triggerPhaseIndexer(caseId, newArtifact.killChainPhase);
+            triggerPhaseIndexer(caseId, newArt.killChainPhase);
             triggerGlobalIndexers(caseId);
         }, 0);
       })
       .catch(error => console.error("Failed to add artifact:", error));
-  }, [triggerPhaseIndexer, triggerGlobalIndexers]);
+  }, [selectedCase, token, triggerPhaseIndexer, triggerGlobalIndexers]);
 
 
   const handleUpdateArtifact = useCallback((caseId: string, artifactId: string, updates: Partial<InvestigationArtifact>) => {
+    if (!selectedCase) return;
     let originalPhase: KillChainPhase | undefined;
     let newPhase: KillChainPhase | undefined;
 
-    const updatedArtifacts = selectedCase!.artifacts.map(a => {
+    const updatedArtifacts = selectedCase.artifacts.map(a => {
         if (a.id === artifactId) {
             originalPhase = a.killChainPhase;
             newPhase = updates.killChainPhase || a.killChainPhase;
@@ -230,7 +227,7 @@ const AppContent: React.FC = () => {
 
     updateCase(caseId, { artifacts: updatedArtifacts }, token!)
       .then(updatedCase => {
-        setCases(prev => prev.map(c => c._id === caseId ? updatedCase : c));
+        setCases(prev => prev.map(c => ((c as any)._id === caseId || c.id === caseId) ? updatedCase : c));
         setTimeout(() => {
             if (originalPhase && newPhase && originalPhase !== newPhase) {
                 triggerPhaseIndexer(caseId, originalPhase);
@@ -240,22 +237,11 @@ const AppContent: React.FC = () => {
         }, 0);
       })
       .catch(error => console.error("Failed to update artifact:", error));
-    
-    return;
-    
-    setTimeout(() => {
-        if (originalPhase && newPhase && originalPhase !== newPhase) {
-            triggerPhaseIndexer(caseId, originalPhase);
-            triggerPhaseIndexer(caseId, newPhase);
-        }
-        triggerGlobalIndexers(caseId);
-    }, 0);
-
-  }, [triggerPhaseIndexer, triggerGlobalIndexers]);
+  }, [selectedCase, token, triggerPhaseIndexer, triggerGlobalIndexers]);
 
   const handleSplitAndOrganizeArtifact = useCallback((caseId: string, originalArtifactId: string, newArtifactsData: { phase: KillChainPhase, title: string, summary: string }[]) => {
-      let updatedCase: Case | null = null;
-      const artifactsWithoutOriginal = selectedCase!.artifacts.filter(a => a.id !== originalArtifactId);
+    if (!selectedCase) return;
+    const artifactsWithoutOriginal = selectedCase.artifacts.filter(a => a.id !== originalArtifactId);
     const newArtifacts: InvestigationArtifact[] = newArtifactsData.map(data => ({
         id: `art-split-${Date.now()}-${Math.random()}`,
         type: 'ANALYST_NOTE',
@@ -268,48 +254,34 @@ const AppContent: React.FC = () => {
 
     updateCase(caseId, { artifacts: updatedArtifacts }, token!)
       .then(updatedCase => {
-        setCases(prev => prev.map(c => c._id === caseId ? updatedCase : c));
+        setCases(prev => prev.map(c => ((c as any)._id === caseId || c.id === caseId) ? updatedCase : c));
         const affectedPhases = new Set(newArtifactsData.map(d => d.phase));
         affectedPhases.forEach(phase => triggerPhaseIndexer(caseId, phase));
         triggerGlobalIndexers(caseId);
       })
       .catch(error => console.error("Failed to split and organize artifact:", error));
-    
-    return;
-      
-      setTimeout(() => {
-        if (updatedCase) {
-             const affectedPhases = new Set(newArtifactsData.map(d => d.phase));
-             affectedPhases.forEach(phase => triggerPhaseIndexer(caseId, phase));
-             triggerGlobalIndexers(caseId);
-        }
-      }, 0);
-
-  }, [triggerPhaseIndexer, triggerGlobalIndexers]);
+  }, [selectedCase, token, triggerPhaseIndexer, triggerGlobalIndexers]);
 
 
   const handleUpdateChecklist = (caseId: string, newChecklist: Omit<ChecklistItem, 'completed'>[]) => {
-      const updatedChecklist = newChecklist.map(item => ({ ...item, completed: false }));
+    const updatedChecklist = newChecklist.map(item => ({ ...item, completed: false }));
     updateCase(caseId, { investigationChecklist: updatedChecklist }, token!)
       .then(updatedCase => {
-        setCases(prev => prev.map(c => c._id === caseId ? updatedCase : c));
+        setCases(prev => prev.map(c => ((c as any)._id === caseId || c.id === caseId) ? updatedCase : c));
       })
       .catch(error => console.error("Failed to update checklist:", error));
-    
-    return;
   };
 
   const handleToggleChecklistItem = (caseId: string, step: number) => {
-      const updatedChecklist = selectedCase!.investigationChecklist.map(item => 
+    if (!selectedCase) return;
+    const updatedChecklist = selectedCase.investigationChecklist.map(item => 
         item.step === step ? { ...item, completed: !item.completed } : item
     );
     updateCase(caseId, { investigationChecklist: updatedChecklist }, token!)
       .then(updatedCase => {
-        setCases(prev => prev.map(c => c._id === caseId ? updatedCase : c));
+        setCases(prev => prev.map(c => ((c as any)._id === caseId || c.id === caseId) ? updatedCase : c));
       })
       .catch(error => console.error("Failed to toggle checklist item:", error));
-    
-    return;
   };
 
   const handleAnalysisComplete = useCallback((caseId: string | null, analysis: AnalysisResult) => {
@@ -337,17 +309,19 @@ const AppContent: React.FC = () => {
     createCase(newCaseData, token!)
       .then(newCase => {
         setCases(prev => [newCase, ...prev]);
-        setSelectedCaseId(newCase._id);
+        const cid = (newCase as any)._id || newCase.id;
+        setSelectedCaseId(cid);
         setActiveView('casebook');
         setTimeout(() => {
-            triggerPhaseIndexer(newCase._id, 'Reconnaissance');
-            triggerGlobalIndexers(newCase._id);
+            triggerPhaseIndexer(cid, 'Reconnaissance');
+            triggerGlobalIndexers(cid);
         }, 0);
       })
       .catch(error => console.error("Failed to create case from analysis:", error));
-  }, [handleAddArtifact, triggerPhaseIndexer, triggerGlobalIndexers]);
+  }, [token, triggerPhaseIndexer, triggerGlobalIndexers]);
   
   const handleSendMessage = async (caseId: string, userMessage: string) => {
+    if (!selectedCase) return;
     const newUserMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       sender: 'user',
@@ -355,13 +329,13 @@ const AppContent: React.FC = () => {
       timestamp: new Date().toISOString(),
     };
 
-    const updatedChatHistory = [...selectedCase!.chatHistory, newUserMessage];
-    setCases(prev => prev.map(c => c._id === caseId ? { ...c, chatHistory: updatedChatHistory } : c));
+    const updatedChatHistory = [...selectedCase.chatHistory, newUserMessage];
+    setCases(prev => prev.map(c => ((c as any)._id === caseId || c.id === caseId) ? { ...c, chatHistory: updatedChatHistory } : c));
     setIsChatLoading(true);
 
     try {
-      const caseContext = JSON.stringify(selectedCase); // Send the whole case object
-      const aiResponseText = await chatWithCaseAssistant(userMessage, caseContext, token!);
+      const caseContext = JSON.stringify(selectedCase);
+      const aiResponseText = await chatWithCaseAssistant(userMessage, caseContext);
 
       const newAiMessage: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
@@ -374,7 +348,7 @@ const AppContent: React.FC = () => {
       
       updateCase(caseId, { chatHistory: finalChatHistory }, token!)
         .then(updatedCase => {
-          setCases(prev => prev.map(c => c._id === caseId ? updatedCase : c));
+          setCases(prev => prev.map(c => ((c as any)._id === caseId || c.id === caseId) ? updatedCase : c));
         })
         .catch(error => console.error("Failed to save chat history:", error));
 
@@ -386,7 +360,7 @@ const AppContent: React.FC = () => {
         text: "Sorry, I encountered an error. Please try again.",
         timestamp: new Date().toISOString(),
       };
-      setCases(prev => prev.map(c => c._id === caseId ? { ...c, chatHistory: [...updatedChatHistory, errorMessage] } : c));
+      setCases(prev => prev.map(c => ((c as any)._id === caseId || c.id === caseId) ? { ...c, chatHistory: [...updatedChatHistory, errorMessage] } : c));
     } finally {
       setIsChatLoading(false);
     }
@@ -413,19 +387,20 @@ const AppContent: React.FC = () => {
     }
 
     if (selectedCase) {
+        const cid = (selectedCase as any)._id || selectedCase.id;
         return <CaseDetailView 
                   caseData={selectedCase} 
                   onBack={() => setSelectedCaseId(null)}
-                  onAddArtifact={(artifact) => handleAddArtifact(selectedCase.id, artifact)}
-                  onUpdateArtifact={(artifactId, updates) => handleUpdateArtifact(selectedCase.id, artifactId, updates)}
-                  onUpdateChecklist={(checklist) => handleUpdateChecklist(selectedCase.id, checklist)}
-                  onToggleChecklistItem={(step) => handleToggleChecklistItem(selectedCase.id, step)}
+                  onAddArtifact={(artifact) => handleAddArtifact(cid, artifact)}
+                  onUpdateArtifact={(artifactId, updates) => handleUpdateArtifact(cid, artifactId, updates)}
+                  onUpdateChecklist={(checklist) => handleUpdateChecklist(cid, checklist)}
+                  onToggleChecklistItem={(step) => handleToggleChecklistItem(cid, step)}
                   onStartNewAnalysis={() => {
-                      setSelectedCaseId(selectedCase.id);
+                      setSelectedCaseId(cid);
                       setActiveView('ai_analyst');
                   }}
-                  onSplitAndOrganizeArtifact={(originalArtifactId, newArtifactsData) => handleSplitAndOrganizeArtifact(selectedCase.id, originalArtifactId, newArtifactsData)}
-                  onSendMessage={(message) => handleSendMessage(selectedCase.id, message)}
+                  onSplitAndOrganizeArtifact={(originalArtifactId, newArtifactsData) => handleSplitAndOrganizeArtifact(cid, originalArtifactId, newArtifactsData)}
+                  onSendMessage={(message) => handleSendMessage(cid, message)}
                   isChatLoading={isChatLoading}
                />;
     }
@@ -450,9 +425,7 @@ const AppContent: React.FC = () => {
 };
 
 const App: React.FC = () => (
-    <AuthProvider>
-        <AppContent />
-    </AuthProvider>
+    <AppContent />
 );
 
 export default App;
